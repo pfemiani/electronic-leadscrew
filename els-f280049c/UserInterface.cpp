@@ -26,23 +26,15 @@
 
 #include "UserInterface.h"
 
-const LED_REG POWER_OFF_LEDS =
-{
-   .all = 0
-};
-
-const MESSAGE POWER_OFF_MESSAGE =
-{
-   .message = { LETTER_O, LETTER_F, LETTER_F, BLANK, BLANK, BLANK, BLANK, BLANK },
-   .displayTime = 0
-};
+#define POWERSTATE bool
+#define POWERSTATE_ON true
+#define POWERSTATE_OFF false
 
 const MESSAGE POWER_ON_MESSAGE =
 {
-   .message = { LETTER_O, LETTER_N, BLANK, BLANK, BLANK, BLANK, BLANK, BLANK },
+   .message = { BLANK, BLANK, BLANK, BLANK, BLANK, BLANK, LETTER_O, LETTER_N },
    .displayTime = UI_REFRESH_RATE_HZ * .5
 };
-
 
 const MESSAGE STARTUP_MESSAGE_2 =
 {
@@ -106,11 +98,6 @@ LED_REG UserInterface::calculateLEDs(const FEED_THREAD *selectedFeed)
     return leds;
 }
 
-LED_REG UserInterface::getPoweredOffLEDs()
-{
-    // get the LEDs for power off mode
-    return POWER_OFF_LEDS;
-}
 
 void UserInterface :: setMessage(const MESSAGE *message)
 {
@@ -126,11 +113,7 @@ void UserInterface :: setMessage(const MESSAGE *message)
 
 void UserInterface :: overrideMessage( void )
 {
-    if (! this->core->isEnabled())
-    {
-        controlPanel->setMessage(POWER_OFF_MESSAGE.message);
-    }
-    else if( this->message != NULL )
+    if( this->message != NULL )
     {
         if( this->messageTime > 0 ) {
             this->messageTime--;
@@ -150,8 +133,12 @@ void UserInterface :: loop( void )
 {
     const FEED_THREAD *newFeed = NULL;
 
-    // display an override message, if there is one
-    overrideMessage();
+
+    if (this->core->isEnabled())
+    {
+        // display an override message, if there is one
+        overrideMessage();
+    }
 
     // just in case, initialize the first time through
     if( feedTable == NULL ) {
@@ -161,27 +148,24 @@ void UserInterface :: loop( void )
     // read key presses from the control panel
     keys = controlPanel->getKeys();
 
-    bool powerOn = false;
     // respond to key presses
     if( keys.bit.POWER )
     {
-        if (this->core->isEnabled())
+        // start with assumption we are turning power off
+        POWERSTATE powerState = POWERSTATE_OFF;
+        // if already disabled, turn power back on
+        if (!this->core->isEnabled())
         {
-            powerOn = false;
-            this->core->setEnabled(powerOn);
-            LED_REG leds = this->getPoweredOffLEDs();
-            controlPanel->setLEDs(leds);
-            controlPanel->refresh();
-        } else
-        {
-            powerOn = true;
-            this->core->setEnabled(powerOn);
-            newFeed = loadFeedTable();
-            setMessage(&POWER_ON_MESSAGE);
+            powerState = POWERSTATE_ON;
+            this->setMessage(&POWER_ON_MESSAGE);
         }
+        // set core and control panel states appropriately
+        this->core->setEnabled(powerState);
+        this->controlPanel->setElsEnabled(powerState);
     }
 
-    if (this->core->isEnabled() || powerOn)
+    // only respond to other button events if ELS is enabled
+    if (this->core->isEnabled())
     {
         if( keys.bit.IN_MM )
         {
@@ -211,22 +195,22 @@ void UserInterface :: loop( void )
         {
             setMessage(&SETTINGS_MESSAGE_1);
         }
-
-        // if we have changed the feed
-        if( newFeed != NULL ) {
-            // update the display
-            LED_REG leds = this->calculateLEDs(newFeed);
-            controlPanel->setLEDs(leds);
-            controlPanel->setValue(newFeed->display);
-
-            // update the core
-            core->setFeed(newFeed);
-            core->setReverse(this->reverse);
-        }
-
-        // update the RPM display
-        controlPanel->setRPM(core->getRPM());
     }
+
+    // if we have changed the feed
+    if( newFeed != NULL ) {
+        // update the display
+        LED_REG leds = this->calculateLEDs(newFeed);
+        controlPanel->setLEDs(leds);
+        controlPanel->setValue(newFeed->display);
+
+        // update the core
+        core->setFeed(newFeed);
+        core->setReverse(this->reverse);
+    }
+
+    // update the RPM display
+    controlPanel->setRPM(core->getRPM());
 
     // write data out to the display
     controlPanel->refresh();
